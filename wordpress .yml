@@ -1,0 +1,146 @@
+---
+- name: "Installing And Configuring mariadb-server"
+  hosts: all
+  become: true
+  vars:
+    mariadb_root_password: "root@123"
+    app_db_name: "wordpress"
+    app_db_user: "wordpress"
+    app_db_password: "wordpress"
+    httpd_port: 80
+    httpd_user: "apache"
+    httpd_group: "apache"
+    domain_name: "blog.jebincvarghese.xyz"
+    wp_url: "https://wordpress.org/latest.tar.gz"
+  tasks:
+    
+    - name: "Apache - Installing httpd server"
+      yum:
+        name: httpd
+        state: present
+            
+    - name: "Apache - Installing php Support"
+      shell: "amazon-linux-extras install php7.4 -y"
+        
+    
+    - name: "Apache - Creating VirtualHost"
+      template:
+        src: vhost.conf.j2
+        dest: "/etc/httpd/conf.d/{{domain_name}}.conf"
+        
+    - name: "Apache - Creating DocumentRoot"
+      file:
+        path: "/var/www/html/{{ domain_name }}"
+        state: directory
+        owner: "{{ httpd_user }}"
+        group: "{{ httpd_group  }}"
+            
+    - name: "Apache - Creating test.php and test.html"
+      copy:
+        src: "{{ item }}"
+        dest: "/var/www/html/{{ domain_name }}/"
+        owner: "{{ httpd_user }}"
+        group: "{{ httpd_group  }}"
+      with_items:
+        - infophp.php   
+    - name: "Apache - Restart/Enabling Service"
+      service:
+        name: httpd
+        state: restarted
+        enabled: true
+            
+    - name: "Mariadb-Server - Package Installation"
+      yum:
+        name: 
+          - mariadb-server
+          - MySQL-python
+        state: present
+            
+    - name: "Mariadb-Server - Restart/Enable Service"
+      service:
+        name: mariadb
+        state: restarted
+        enabled: true
+            
+    - name: "Mariadb-Server - Setting Root Password"
+      ignore_errors: true
+      mysql_user:
+        login_user: "root"
+        login_password: ""
+        user: "root"
+        host_all: true
+        password: "{{ mariadb_root_password }}"
+            
+    - name: "Mariadb-Server - Removing Anonymous User"
+      mysql_user:
+        login_user: "root"
+        login_password: "{{ mariadb_root_password }}"
+        user: ""
+        state: absent
+        host_all: true
+            
+    - name: "Mariadb-Server - Removing Test Database"
+      mysql_db:
+        login_user: "root"
+        login_password: "{{ mariadb_root_password }}"
+        name: "test"
+        state: absent
+            
+    - name: "Mariadb-Server - Creating Application Database Called {{ app_db_name }}"
+      mysql_db:
+        login_user: "root"
+        login_password: "{{ mariadb_root_password }}"
+        name: "{{ app_db_name }}"
+        state: present
+            
+    - name: "Mariadb-Server - Creating Application User {{ app_db_user }} and Setting Privileges"
+      mysql_user:
+        login_user: "root"
+        login_password: "{{ mariadb_root_password }}"
+        user: "{{ app_db_user }}"
+        state: present
+        password: "{{ app_db_password }}"
+        priv: "{{ app_db_name }}.*:ALL"
+            
+            
+    - name: "Wordpress - Downloading Archive File"
+      get_url:
+        url: "{{ wp_url }}"
+        dest: "/tmp/wordpress.tar.gz"
+            
+    - name: "Wordpress - Extracting Archive"
+      unarchive:
+        src: "/tmp/wordpress.tar.gz"
+        dest: "/tmp/"
+        remote_src: true
+            
+    - name: "Wordpress - Copying File to DocumentRoot /var/www/html/{{ domain_name }} "
+      copy:
+        src: "/tmp/wordpress/"
+        dest: "/var/www/html/{{ domain_name }}/"
+        owner: "{{ httpd_user }}"
+        group: "{{ httpd_group }}"
+            
+    - name: "Wordpress - Creating wp-config.php"
+      template:
+        src: wp-config.php.j2
+        dest: "/var/www/html/{{ domain_name }}/wp-config.php"
+        owner: "{{ httpd_user }}"
+        group: "{{ httpd_group }}"
+            
+    - name: "Post-Installation - CleanUp"
+      file:
+        path: "{{ item }}"
+        state: absent
+      with_items:
+        - "/tmp/wordpress.tar.gz"
+        - "/tmp/wordpress"
+        
+    - name: "Post-Installation - Restarting"
+      service:
+        name: "{{ item }}"
+        state: restarted
+        enabled: true
+      with_items:
+        - httpd
+        - mariadb
